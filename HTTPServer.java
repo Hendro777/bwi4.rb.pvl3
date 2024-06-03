@@ -9,6 +9,8 @@
 
 import java.io.*;
 import java.net.*;
+import java.net.http.HttpResponse;
+import java.nio.file.Files;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -17,7 +19,7 @@ import java.util.concurrent.*;
 
 public class HTTPServer {
     public static final String HTTP_VERSION = "HTTP/1.0";
-    public static final String STANDARD_ROOT_PATH =  "/Users/hendrik/Entwicklung Studium/BWI4-RB Entwicklung/Praktikum3_HttpServer/html";
+    public static final String STANDARD_ROOT_PATH = "/Users/hendrik/Entwicklung Studium/BWI4-RB Entwicklung/Praktikum3_HttpServer/html";
     /* HTTP-Server, der Verbindungsanfragen entgegennimmt */
 
     /* Semaphore begrenzt die Anzahl parallel laufender Worker-Threads  */
@@ -138,7 +140,7 @@ class HTTPWorkerThread extends Thread {
         System.err.println("Handle HTTP Request:");
         try {
             /* Lese HTTP-Anfrage */
-            HTTPRequest request = readHTTPRequest();
+            HTTPRequest<String> request = readHTTPRequest();
             System.err.println("HTTP Request:");
             System.err.println(CRLF + "---------------------");
             System.err.println(request.toString());
@@ -151,39 +153,122 @@ class HTTPWorkerThread extends Thread {
             System.err.println(response.toString());
             System.err.println(CRLF + "---------------------");
 
-            writeToClient(response.getHttpVersion() + " " + response.getStatusCode() + " " + response.getStatusMessage());
-            for(Map.Entry<String, String> entry : response.Headers().entrySet()) {
-                writeToClient(entry.getKey() + ": " + entry.getValue());
-            }
-            writeToClient("");
+            /* Sende HTTP-Antwort */
+            writeToClient(response);
 
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
+    private void writeToClient(HTTPResponse response) throws IOException {
+        writeToClient(response.getHttpVersion() + " " + response.getStatusCode() + " " + response.getStatusMessage());
+        response.Headers().forEach((key, value) -> {
+            try {
+                writeToClient(key + ": " + value);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
+        writeToClient("");
+
+        if (response.Body() != null) {
+            writeToClient(
+                    response.Body() instanceof String ? ((String) response.Body()).getBytes() : (byte[]) response.Body()
+            );
+        }
+    }
+
     private HTTPResponse generateHTTPResponse(HTTPRequest request) {
         /* Erzeuge HTTP-Antwort */
-        HTTPResponse response = new HTTPResponse();
-        response.setHttpVersion(HTTPServer.HTTP_VERSION);
+        HTTPResponse response;
 
+        /* Überprüfe, ob der User-Agent ein Browser ist */
+        String userAgent = request.getHeader("User-Agent");
+        if (!(userAgent.contains("curl") || userAgent.contains("Firefox"))) {
+            response = new HTTPResponse<String>();
+            response.setStatusCode(HTTPResponse.HTTPStatusCode.NOT_ACCEPTABLE);
+            response.setHeader("Content-Type", "text/plain");
+            response.setBody("Not acceptable!");
+
+            return setStandardHeaders(response);
+        }
+
+        /* Überprüfe, ob die angeforderte Datei existiert */
         System.err.println("Request Path: " + request.getPath());
         File file = new File(server.rootPath + request.getPath());
 
-        if(!file.exists()) {
+        if (!file.exists()) {
+            response = new HTTPResponse<String>();
             response.setStatusCode(HTTPResponse.HTTPStatusCode.NOT_FOUND);
-            response.setBody("File not found!");
-        } else {
+            response.setHeader("Content-Type", "text/plain");
+            response.setBody("404 - File not found!");
+
+            return setStandardHeaders(response);
+        } else if (file.isDirectory()) {
+            File[] files = file.listFiles();
+            response = new HTTPResponse<String>();
             response.setStatusCode(HTTPResponse.HTTPStatusCode.OK);
-            response.setBody("File found!");
-        }
+            response.setHeader("Content-Type", "text/html");
 
-        String userAgent = request.getHeader("User-Agent");
-        if( (userAgent.contains("curl") || userAgent.contains("Firefox")) ) {
-            response.setStatusCode(HTTPResponse.HTTPStatusCode.NOT_ACCEPTABLE);
-            response.setBody("Not acceptable!");
-        }
+            StringBuilder body = new StringBuilder();
+            body.append("<html><head><title>Directory Listing</title></head><body>");
+            body.append("<h1>Directory Listing</h1>");
+            body.append("<ul>");
+            for (File f : files) {
+                body.append("<li><a href=\"")
+                        .append(request.getPath().endsWith("/") ? request.getPath() : request.getPath() + "/")
+                        .append(f.getName())
+                        .append("\">")
+                        .append(f.getName())
+                        .append("</a></li>");
+            }
+            body.append("</ul>");
+            body.append("</body></html>");
 
+            response.setBody(body.toString());
+
+            return setStandardHeaders(response);
+        } else {
+            response = new HTTPResponse<String>();
+            response.setStatusCode(HTTPResponse.HTTPStatusCode.OK);
+            response.setHeader("Content-Type", determineContentType(file));
+            response.setHeader("Content-Length", String.valueOf(file.length()));
+
+            try (FileInputStream fis = new FileInputStream(file)) {
+                byte[] data = new byte[(int) file.length()];
+                fis.read(data);
+                response.setBody(data);
+            } catch (IOException e) {
+                response.setStatusCode(HTTPResponse.HTTPStatusCode.INTERNAL_SERVER_ERROR);
+                e.printStackTrace();
+            }
+
+            return setStandardHeaders(response);
+        }
+    }
+
+    private String determineContentType(File file) {
+        String fileType = file.getName().split("\\.")[1];
+
+        switch (fileType) {
+            case "html":
+                return "text/html";
+            case "jpg":
+                return "image/jpeg";
+            case "gif":
+                return "image/gif";
+            case "ico":
+                return "image/x-icon";
+            case "pdf":
+                return "application/pdf";
+            default:
+                throw new UnsupportedOperationException("File type not supported!");
+        }
+    }
+
+    private HTTPResponse setStandardHeaders(HTTPResponse response) {
+        response.setHttpVersion(HTTPServer.HTTP_VERSION);
         response.setHeader("Date", Instant.now().toString());
         response.setHeader("Server", "Simple Java HTTP Server");
 
@@ -231,5 +316,11 @@ class HTTPWorkerThread extends Thread {
         /* Sende eine Antwortzeile zum Client
          * ALLE Antworten an den Client müssen über diese Methode gesendet werden ("Sub-Layer") */
         outToClient.write((line + CRLF).getBytes());
+    }
+
+    private void writeToClient(byte[] data) throws IOException {
+        /* Sende Daten zum Client
+         * ALLE Antworten an den Client müssen über diese Methode gesendet werden ("Sub-Layer") */
+        outToClient.write(data);
     }
 }

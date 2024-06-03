@@ -27,9 +27,6 @@ public class HTTPResponse<T> extends HTTPMessage<T> {
     }
     private HTTPStatusCode statusCode;
 
-    private HTTPResponse() {
-    }
-
     public int getStatusCode() {
         return statusCode.code;
     }

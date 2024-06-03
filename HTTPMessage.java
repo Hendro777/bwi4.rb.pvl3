@@ -3,7 +3,7 @@ import java.util.Map;
 
 public abstract class HTTPMessage<T> {
     private String httpVersion;
-    private Map<String, String> headers = new HashMap<>();
+    private Map<String, String> headers = new HashMap<String, String>();
     private T body;
 
     public String getHttpVersion() {

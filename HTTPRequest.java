@@ -4,23 +4,17 @@ import java.util.Map;
 public class HTTPRequest<T> extends HTTPMessage<T> {
     public enum HTTPMethod {
         GET,
-        POST,
-        PUT,
-        PATCH,
-        DELETE;
+        HEAD,
+        POST;
 
         public static HTTPMethod parseMethodString(String methodString) {
             switch (methodString.toUpperCase()) {
                 case ("GET"):
                     return GET;
+                case ("HEAD"):
+                    return HEAD;
                 case ("POST"):
                     return POST;
-                case ("PUT"):
-                    return PUT;
-                case ("PATCH"):
-                    return PATCH;
-                case ("DELETE"):
-                    return DELETE;
                 default:
                     throw new UnsupportedOperationException();
             }
