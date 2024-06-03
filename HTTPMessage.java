@@ -6,6 +6,12 @@ public abstract class HTTPMessage<T> {
     private Map<String, String> headers = new HashMap<String, String>();
     private T body;
 
+    public HTTPMessage(String httpVersion, Map<String, String> headers, T body) {
+        this.httpVersion = httpVersion;
+        this.headers = headers;
+        this.body = body;
+    }
+
     public String getHttpVersion() {
         return httpVersion;
     }
@@ -16,6 +22,10 @@ public abstract class HTTPMessage<T> {
 
     public Map<String, String> Headers() {
         return new HashMap<String, String>(headers);
+    }
+
+    protected void setHeaders(Map<String, String> headers) {
+        this.headers = headers;
     }
 
     public String getHeader(String key) {
@@ -32,6 +42,34 @@ public abstract class HTTPMessage<T> {
 
     public T Body() {
         return body;
+    }
+
+    /*
+     * This method should parse a single line of an HTTP header and return a Map.Entry object
+     * containing the key and value of the header. The key should be the first word in the line
+     * and the value should be the rest of the line.
+     *
+     * @param headerLine a single line of an HTTP header
+     * @return a Map.Entry object containing the key and value of the header
+     */
+    public Map.Entry<String, String> parseHeader(String headerLine) {
+        String[] headerParts = headerLine.split(": ");
+        return new Map.Entry<String, String>() {
+            @Override
+            public String getKey() {
+                return headerParts[0];
+            }
+
+            @Override
+            public String getValue() {
+                return headerParts[1];
+            }
+
+            @Override
+            public String setValue(String value) {
+                return null;
+            }
+        };
     }
 }
 

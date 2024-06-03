@@ -24,12 +24,18 @@ public class HTTPRequest<T> extends HTTPMessage<T> {
     private HTTPMethod method;
     private String path;
 
+    public HTTPRequest(HTTPMethod method, String path, String version, Map<String, String> headers, T body) {
+        super(version, headers, body);
+        this.method = method;
+        this.path = path;
+    }
+
     public HTTPMethod getMethod() {
         return method;
     }
 
-    public void setMethod(String method) {
-        this.method = HTTPMethod.parseMethodString(method);
+    public void setMethod(HTTPMethod method) {
+        this.method = method;
     }
 
     public String getPath() {

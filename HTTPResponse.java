@@ -27,6 +27,11 @@ public class HTTPResponse<T> extends HTTPMessage<T> {
     }
     private HTTPStatusCode statusCode;
 
+    public HTTPResponse(String httpVersion, HTTPStatusCode statusCode, Map<String, String> headers, T body) {
+        super(httpVersion, headers, body);
+        this.statusCode = statusCode;
+    }
+
     public int getStatusCode() {
         return statusCode.code;
     }

@@ -7,12 +7,20 @@
  *       Bei Dienstanfrage einen Arbeitsthread erzeugen, der eine HTTP-Anfrage bearbeitet
  */
 
+import org.w3c.dom.html.HTMLImageElement;
+
 import java.io.*;
 import java.net.*;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
+import java.text.DateFormat;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.*;
 
@@ -93,6 +101,13 @@ public class HTTPServer {
 
 // ----------------------------------------------------------------------------
 
+/*
+ * HTTPWorkerThread.java
+ *
+ * Version 1.0
+ * Autor: H. Lind
+ * Zweck: Arbeitsthread, der eine existierende Socket-Verbindung zur Bearbeitung erhaelt
+ */
 class HTTPWorkerThread extends Thread {
     /*
      * Arbeitsthread, der eine existierende Socket-Verbindung zur Bearbeitung
@@ -108,6 +123,7 @@ class HTTPWorkerThread extends Thread {
     private DataOutputStream outToClient;
     boolean workerServiceRequested = true; // Arbeitsthread beenden?
 
+    /* Konstruktor */
     public HTTPWorkerThread(int num, Socket sock, HTTPServer server) {
         /* Konstruktor */
         this.name = num;
@@ -136,6 +152,7 @@ class HTTPWorkerThread extends Thread {
         }
     }
 
+    /* HTTP-Anfrage bearbeiten */
     private void handleHTTPRequest() {
         System.err.println("Handle HTTP Request:");
         try {
@@ -161,37 +178,53 @@ class HTTPWorkerThread extends Thread {
         }
     }
 
-    private void writeToClient(HTTPResponse response) throws IOException {
-        writeToClient(response.getHttpVersion() + " " + response.getStatusCode() + " " + response.getStatusMessage());
-        response.Headers().forEach((key, value) -> {
-            try {
-                writeToClient(key + ": " + value);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        });
-        writeToClient("");
-
-        if (response.Body() != null) {
-            writeToClient(
-                    response.Body() instanceof String ? ((String) response.Body()).getBytes() : (byte[]) response.Body()
-            );
-        }
-    }
-
     private HTTPResponse generateHTTPResponse(HTTPRequest request) {
         /* Erzeuge HTTP-Antwort */
         HTTPResponse response;
+        Map<String, String> headers = new HashMap<String, String>();
 
         /* Überprüfe, ob der User-Agent ein Browser ist */
         String userAgent = request.getHeader("User-Agent");
-        if (!(userAgent.contains("curl") || userAgent.contains("Firefox"))) {
-            response = new HTTPResponse<String>();
-            response.setStatusCode(HTTPResponse.HTTPStatusCode.NOT_ACCEPTABLE);
+        if (!(userAgent.contains("curl") || userAgent.contains("Firefox") || userAgent.contains("HTTPie"))) {
+            String body = "User-agent is not accepted!";
+
+            response = new HTTPResponse<String>(HTTPServer.HTTP_VERSION, HTTPResponse.HTTPStatusCode.NOT_ACCEPTABLE, headers, body);
             response.setHeader("Content-Type", "text/plain");
-            response.setBody("Not acceptable!");
 
             return setStandardHeaders(response);
+        }
+
+        if (!request.getMethod().equals(HTTPRequest.HTTPMethod.GET)) {
+            String body = "Method not supported!";
+
+            response = new HTTPResponse<String>(HTTPServer.HTTP_VERSION, HTTPResponse.HTTPStatusCode.BAD_REQUEST, headers, body);
+            response.setHeader("Content-Type", "text/plain");
+
+            return setStandardHeaders(response);
+        }
+
+        /* RESTful API Zeitserver */
+        switch (request.getPath()) {
+            case "/time":
+                DateTimeFormatter dtf = DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM);
+                String body = LocalTime.now().format(dtf);
+
+                response = new HTTPResponse<String>(HTTPServer.HTTP_VERSION, HTTPResponse.HTTPStatusCode.OK, headers, body);
+                response.setHeader("Content-Type", "text/plain");
+                response.setHeader("Content-Length", String.valueOf(body.length()));
+
+                return setStandardHeaders(response);
+            case "/date":
+                dtf = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM);
+                body = LocalDate.now().format(dtf);
+
+                response = new HTTPResponse<String>(HTTPServer.HTTP_VERSION, HTTPResponse.HTTPStatusCode.OK, headers, body);
+                response.setHeader("Content-Type", "text/plain");
+                response.setHeader("Content-Length", String.valueOf(body.length()));
+
+                return setStandardHeaders(response);
+            default:
+                break;
         }
 
         /* Überprüfe, ob die angeforderte Datei existiert */
@@ -199,17 +232,16 @@ class HTTPWorkerThread extends Thread {
         File file = new File(server.rootPath + request.getPath());
 
         if (!file.exists()) {
-            response = new HTTPResponse<String>();
-            response.setStatusCode(HTTPResponse.HTTPStatusCode.NOT_FOUND);
+            // Datei nicht gefunden
+            String body = "404 - File not found!)";
+
+            response = new HTTPResponse<String>(HTTPServer.HTTP_VERSION, HTTPResponse.HTTPStatusCode.NOT_FOUND, headers, body);
             response.setHeader("Content-Type", "text/plain");
-            response.setBody("404 - File not found!");
 
             return setStandardHeaders(response);
         } else if (file.isDirectory()) {
+            // Verzeichnisinhalt anzeigen
             File[] files = file.listFiles();
-            response = new HTTPResponse<String>();
-            response.setStatusCode(HTTPResponse.HTTPStatusCode.OK);
-            response.setHeader("Content-Type", "text/html");
 
             StringBuilder body = new StringBuilder();
             body.append("<html><head><title>Directory Listing</title></head><body>");
@@ -226,25 +258,26 @@ class HTTPWorkerThread extends Thread {
             body.append("</ul>");
             body.append("</body></html>");
 
-            response.setBody(body.toString());
+            response = new HTTPResponse<String>(HTTPServer.HTTP_VERSION, HTTPResponse.HTTPStatusCode.OK, headers, body.toString());
+            response.setHeader("Content-Type", "text/html");
 
             return setStandardHeaders(response);
         } else {
-            response = new HTTPResponse<String>();
-            response.setStatusCode(HTTPResponse.HTTPStatusCode.OK);
-            response.setHeader("Content-Type", determineContentType(file));
-            response.setHeader("Content-Length", String.valueOf(file.length()));
-
+            // Datei gefunden
             try (FileInputStream fis = new FileInputStream(file)) {
                 byte[] data = new byte[(int) file.length()];
                 fis.read(data);
-                response.setBody(data);
-            } catch (IOException e) {
-                response.setStatusCode(HTTPResponse.HTTPStatusCode.INTERNAL_SERVER_ERROR);
-                e.printStackTrace();
-            }
 
-            return setStandardHeaders(response);
+                response = new HTTPResponse<byte[]>(HTTPServer.HTTP_VERSION, HTTPResponse.HTTPStatusCode.OK, headers, data);
+                response.setHeader("Content-Type", determineContentType(file));
+                response.setHeader("Content-Length", String.valueOf(file.length()));
+
+                return setStandardHeaders(response);
+            } catch (IOException e) {
+                HTTPResponse<String> errorResponse = new HTTPResponse<String>(HTTPServer.HTTP_VERSION, HTTPResponse.HTTPStatusCode.INTERNAL_SERVER_ERROR, headers, "500 - Internal Server Error!");
+                e.printStackTrace();
+                return setStandardHeaders(errorResponse);
+            }
         }
     }
 
@@ -268,29 +301,33 @@ class HTTPWorkerThread extends Thread {
     }
 
     private HTTPResponse setStandardHeaders(HTTPResponse response) {
-        response.setHttpVersion(HTTPServer.HTTP_VERSION);
         response.setHeader("Date", Instant.now().toString());
         response.setHeader("Server", "Simple Java HTTP Server");
 
         return response;
     }
 
-
+    // Lese den Input Stream vom Client und erstelle ein HTTPRequest Objekt
     private HTTPRequest readHTTPRequest() throws IOException {
-        HTTPRequest request = new HTTPRequest();
-
         String curLine = readFromClient();
-        request.setMethod(curLine.split(" ")[0]);
-        request.setPath(curLine.split(" ")[1]);
-        request.setHttpVersion(curLine.split(" ")[2]);
+        String status[] = curLine.split(" ");
+
+        Map<String, String> headers = new HashMap<String, String>();
 
         curLine = readFromClient();
         while (!curLine.isEmpty() && curLine != CRLF) {
-            String[] headerLineArr = curLine.split(": ");
-            request.setHeader(headerLineArr[0], headerLineArr[1]);
+            String[] headerParts = curLine.split(": ");
+            headers.put(headerParts[0], headerParts[1]);
 
             curLine = readFromClient();
         }
+
+        HTTPRequest request = new HTTPRequest(
+                HTTPRequest.HTTPMethod.parseMethodString(status[0]),
+                status[1],
+                status[2],
+                headers,
+                null);
 
 //        StringBuilder bodyStringBuilder = new StringBuilder();
 //        curLine = readFromClient();
@@ -305,6 +342,7 @@ class HTTPWorkerThread extends Thread {
         return request;
     }
 
+    // Lese eine Zeile vom Client InputStream
     private String readFromClient() throws IOException {
         /* Lies die naechste Anfrage-Zeile (request) vom Client
          * ALLE Anfragen vom Client müssen über diese Methode empfangen werden ("Sub-Layer") */
@@ -312,12 +350,33 @@ class HTTPWorkerThread extends Thread {
         return inFromClient.readLine();
     }
 
+    // Schreibe eine HTTPResponse zum Client OutputStream
+    private void writeToClient(HTTPResponse response) throws IOException {
+        writeToClient(response.getHttpVersion() + " " + response.getStatusCode() + " " + response.getStatusMessage());
+        response.Headers().forEach((key, value) -> {
+            try {
+                writeToClient(key + ": " + value);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
+        writeToClient("");
+
+        if (response.Body() != null) {
+            writeToClient(
+                    response.Body() instanceof String ? ((String) response.Body()).getBytes() : (byte[]) response.Body()
+            );
+        }
+    }
+
+    // Schreibe eine Zeile zum Client OutputStream
     private void writeToClient(String line) throws IOException {
         /* Sende eine Antwortzeile zum Client
          * ALLE Antworten an den Client müssen über diese Methode gesendet werden ("Sub-Layer") */
         outToClient.write((line + CRLF).getBytes());
     }
 
+    // Schreibe ein Byte-Array zum Client OutputStream
     private void writeToClient(byte[] data) throws IOException {
         /* Sende Daten zum Client
          * ALLE Antworten an den Client müssen über diese Methode gesendet werden ("Sub-Layer") */
