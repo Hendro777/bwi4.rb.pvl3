@@ -130,6 +130,15 @@ class HTTPWorkerThread extends Thread {
                 response.setHeader("Content-Length", String.valueOf(body.length()));
 
                 return setStandardHeaders(response);
+            case "/shutdown":
+                server.serviceRequested = false;
+                body = "Server is shutting down!";
+
+                response = new HTTPResponse<String>(HTTPServer.HTTP_VERSION, HTTPResponse.HTTPStatusCode.OK, headers, body);
+                response.setHeader("Content-Type", "text/plain");
+                response.setHeader("Content-Length", String.valueOf(body.length()));
+
+                return setStandardHeaders(response);
             default:
                 break;
         }

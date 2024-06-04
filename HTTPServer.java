@@ -13,7 +13,7 @@ import java.util.concurrent.*;
 
 public class HTTPServer {
     public static final String HTTP_VERSION = "HTTP/1.0";
-    public static final String STANDARD_ROOT_PATH = "/Users/hendrik/Entwicklung Studium/BWI4-RB Entwicklung/Praktikum3_HttpServer/html";
+    public static final String STANDARD_ROOT_PATH = System.getProperty("user.dir") + "/html";
     /* HTTP-Server, der Verbindungsanfragen entgegennimmt */
 
     /* Semaphore begrenzt die Anzahl parallel laufender Worker-Threads  */
@@ -73,6 +73,8 @@ public class HTTPServer {
                 /* Neuen Arbeits-Thread erzeugen und die Nummer, den Socket sowie das Serverobjekt uebergeben */
                 (new HTTPWorkerThread(nextThreadNumber++, connectionSocket, this)).start();
             }
+
+            System.err.println("Server shutdown");
         } catch (Exception e) {
             System.err.println(e.toString());
         }
